@@ -13,6 +13,13 @@ type KittyEvent = {
 // modifier-key values so debug/reload can be used to tune if needed.
 const DEFAULT_ALT_CODEPOINTS = new Set([57430, 57434, 57443, 57447]);
 
+function isKittyModifierCodepoint(codepoint: number): boolean {
+	// Kitty keyboard protocol reports bare modifier keys in the private-use range
+	// just after keypad keys. Consume them so Shift/Ctrl/Option presses don't get
+	// inserted into the editor as odd glyphs when flag 8 is enabled.
+	return codepoint >= 57428 && codepoint <= 57453;
+}
+
 function parseAltCodepoints(): Set<number> {
 	const raw = process.env.PI_OPTIONAL_FOOTER_ALT_CODEPOINTS;
 	if (!raw) return DEFAULT_ALT_CODEPOINTS;
@@ -123,6 +130,9 @@ export default function optionalFooter(pi: ExtensionAPI) {
 			const event = parseKittyCsiU(data);
 			if (event && altCodepoints.has(event.codepoint)) {
 				setOptionDown(event.eventType !== "release");
+			}
+			if (event && isKittyModifierCodepoint(event.codepoint)) {
+				return { consume: true };
 			}
 			return undefined;
 		});

@@ -36,9 +36,25 @@ export default function inputBoxContextColor(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		if (!ctx.hasUI) return;
 
+		const previousEditor = ctx.ui.getEditorComponent();
 		ctx.ui.setEditorComponent((tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => {
 			requestRender = () => tui.requestRender();
-			return new ContextColorEditor(tui, theme, keybindings, ctx);
+
+			if (!previousEditor) {
+				return new ContextColorEditor(tui, theme, keybindings, ctx);
+			}
+
+			const editor = previousEditor(tui, theme, keybindings) as ReturnType<typeof previousEditor> & {
+				borderColor?: (s: string) => string;
+				render(width: number): string[];
+			};
+			const fallbackBorderColor = theme.borderColor;
+			const render = editor.render.bind(editor);
+			editor.render = (width: number): string[] => {
+				editor.borderColor = (s: string) => colorBorder(ctx, fallbackBorderColor, s);
+				return render(width);
+			};
+			return editor;
 		});
 	});
 

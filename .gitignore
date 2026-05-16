@@ -1,3 +1,4 @@
 agent/auth.json
 agent/sessions
 agent/skills
+/agent/mcp-oauth/toolshed/tokens.json

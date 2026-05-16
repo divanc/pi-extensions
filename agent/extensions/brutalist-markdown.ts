@@ -6,8 +6,10 @@ const RESET = "\x1b[0m";
 const WHITE = "\x1b[38;2;255;255;255m";
 const BLACK = "\x1b[38;2;0;0;0m";
 const BLACK_BG = "\x1b[48;2;0;0;0m";
-const CODE_FG = "\x1b[38;2;0;95;110m";
-const INLINE_CODE_BG = "\x1b[48;2;232;238;240m";
+const RED = "\x1b[38;2;239;47;58m";
+// Inline code badges. Keep them soft/sweet so black remains reserved for heading slabs.
+const CODE_FG = "\x1b[38;2;183;31;43m"; // redline
+const INLINE_CODE_BG = "\x1b[48;2;255;241;214m"; // butter
 const MUTED = "\x1b[38;2;120;130;145m";
 
 type MarkdownToken = { type: string; [key: string]: unknown };
@@ -29,7 +31,7 @@ type MarkdownInternals = {
 	renderListItem(tokens: MarkdownToken[], parentDepth: number, styleContext?: InlineStyleContext): string[];
 };
 
-type Originals = Pick<MarkdownInternals, "renderInlineTokens" | "renderToken" | "renderListItem">;
+type Originals = Pick<MarkdownInternals, "renderInlineTokens" | "renderToken" | "renderList" | "renderListItem">;
 type PatchableMarkdownPrototype = MarkdownInternals & { [ORIGINALS_KEY]?: Originals };
 
 function headingBar(text: string, width: number): string {
@@ -52,6 +54,10 @@ function boxedCodeLine(text: string, width: number): string {
 
 function inlineCode(text: string): string {
 	return `${INLINE_CODE_BG}${CODE_FG} ${text} ${RESET}`;
+}
+
+function listMarker(text: string): string {
+	return `${RED}${text}${RESET}`;
 }
 
 function tokenText(token: MarkdownToken, key: "raw" | "text" = "text"): string {
@@ -132,16 +138,50 @@ export default function brutalistMarkdown(_pi: ExtensionAPI) {
 	if (proto[ORIGINALS_KEY]) {
 		proto.renderInlineTokens = proto[ORIGINALS_KEY].renderInlineTokens;
 		proto.renderToken = proto[ORIGINALS_KEY].renderToken;
+		if (proto[ORIGINALS_KEY].renderList) proto.renderList = proto[ORIGINALS_KEY].renderList;
 		proto.renderListItem = proto[ORIGINALS_KEY].renderListItem;
 	} else {
 		proto[ORIGINALS_KEY] = {
 			renderInlineTokens: proto.renderInlineTokens,
 			renderToken: proto.renderToken,
+			renderList: proto.renderList,
 			renderListItem: proto.renderListItem,
 		};
 	}
 
 	const originals = proto[ORIGINALS_KEY];
+	// Backfill for sessions that loaded an older version of this extension before renderList was patched.
+	if (!originals.renderList) originals.renderList = proto.renderList;
+
+	proto.renderList = function patchedRenderList(token: MarkdownToken, depth: number, styleContext?: InlineStyleContext) {
+		const lines: string[] = [];
+		const indent = "  ".repeat(depth);
+		const startNumber = typeof token.start === "number" ? token.start : 1;
+		const items = Array.isArray(token.items) ? token.items : [];
+		const ordered = token.ordered === true;
+
+		for (let i = 0; i < items.length; i++) {
+			const item = items[i] as MarkdownToken;
+			const bullet = ordered ? `${startNumber + i}. ` : "- ";
+			const itemLines = originals.renderListItem.call(this, tokenArray(item), depth, styleContext);
+
+			if (itemLines.length > 0) {
+				const firstLine = itemLines[0] ?? "";
+				const isNestedList = /^\s+\x1b\[[\d;]*m[-\d]/.test(firstLine);
+				lines.push(isNestedList ? firstLine : indent + listMarker(bullet) + firstLine);
+
+				for (let j = 1; j < itemLines.length; j++) {
+					const line = itemLines[j] ?? "";
+					const isNestedListLine = /^\s+\x1b\[[\d;]*m[-\d]/.test(line);
+					lines.push(isNestedListLine ? line : `${indent}  ${line}`);
+				}
+			} else {
+				lines.push(indent + listMarker(bullet));
+			}
+		}
+
+		return lines;
+	};
 
 	proto.renderListItem = function patchedRenderListItem(tokens: MarkdownToken[], parentDepth: number, styleContext?: InlineStyleContext) {
 		return originals.renderListItem.call(this, tokens, parentDepth, styleContext).map(stripTaskMarker);

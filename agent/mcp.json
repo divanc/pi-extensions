@@ -1,0 +1,17 @@
+{
+  "settings": {
+    "autoAuth": true
+  },
+  "imports": [
+    "claude-code",
+    "claude-desktop",
+    "codex"
+  ],
+  "mcpServers": {
+    "toolshed": {
+      "type": "http",
+      "url": "https://toolshed.funnelfox.dev/mcp",
+      "auth": "oauth"
+    }
+  }
+}

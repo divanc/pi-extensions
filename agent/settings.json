@@ -1,9 +1,12 @@
 {
-  "lastChangelogVersion": "0.72.1",
+  "lastChangelogVersion": "0.74.0",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
   "defaultThinkingLevel": "medium",
-  "packages": [],
+  "packages": [
+    "npm:pi-mcp-adapter"
+  ],
   "theme": "light",
-  "treeFilterMode": "default"
+  "treeFilterMode": "default",
+  "editorPaddingX": 2
 }

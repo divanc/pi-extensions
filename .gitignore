@@ -4,3 +4,4 @@ agent/skills
 /agent/mcp-oauth/toolshed/tokens.json
 /agent/mcp-cache.json
 /agent/mcp-onboarding.json
+/context-mode/sessions/context-mode.db

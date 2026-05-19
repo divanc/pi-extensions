@@ -5,3 +5,5 @@ agent/skills
 /agent/mcp-cache.json
 /agent/mcp-onboarding.json
 /context-mode/sessions/context-mode.db
+/context-mode/sessions/context-mode.db-shm
+/context-mode/sessions/context-mode.db-wal

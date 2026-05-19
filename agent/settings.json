@@ -9,5 +9,9 @@
   ],
   "theme": "light",
   "treeFilterMode": "default",
-  "editorPaddingX": 2
+  "editorPaddingX": 2,
+  "webSearch": {
+    "provider": "tavily",
+    "tavilyApiKey": "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"
+  }
 }

@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Markdown, visibleWidth } from "@earendil-works/pi-tui";
+import { Markdown, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 const ORIGINALS_KEY = Symbol.for("pi.brutalist-markdown.originals");
 const RESET = "\x1b[0m";
@@ -27,8 +27,8 @@ type MarkdownInternals = {
 	getDefaultInlineStyleContext(): InlineStyleContext;
 	renderInlineTokens(tokens: MarkdownToken[], styleContext?: InlineStyleContext): string;
 	renderToken(token: MarkdownToken, width: number, nextTokenType?: string, styleContext?: unknown): string[];
-	renderList(token: MarkdownToken, depth: number, styleContext?: InlineStyleContext): string[];
-	renderListItem(tokens: MarkdownToken[], parentDepth: number, styleContext?: InlineStyleContext): string[];
+	renderList(token: MarkdownToken, depth: number, width: number, styleContext?: InlineStyleContext): string[];
+	renderListItem?: (tokens: MarkdownToken[], parentDepth: number, styleContext?: InlineStyleContext) => string[];
 };
 
 type Originals = Pick<MarkdownInternals, "renderInlineTokens" | "renderToken" | "renderList" | "renderListItem">;
@@ -86,6 +86,34 @@ function stripTaskMarker(line: string): string {
 	return line.replace(/^\s*\[[ xX]\]\s+/, "");
 }
 
+function renderListItemCompat(
+	self: MarkdownInternals,
+	originals: Originals,
+	tokens: MarkdownToken[],
+	parentDepth: number,
+	width: number,
+	styleContext?: InlineStyleContext,
+): string[] {
+	if (originals.renderListItem) {
+		return originals.renderListItem.call(self, tokens, parentDepth, styleContext).map(stripTaskMarker);
+	}
+
+	const lines: string[] = [];
+	for (const itemToken of tokens) {
+		if (itemToken.type === "list") {
+			lines.push(...self.renderList(itemToken, parentDepth + 1, width, styleContext));
+			continue;
+		}
+
+		for (const line of self.renderToken(itemToken, Math.max(1, width), undefined, styleContext)) {
+			for (const wrappedLine of wrapTextWithAnsi(line, Math.max(1, width))) {
+				lines.push(stripTaskMarker(wrappedLine));
+			}
+		}
+	}
+	return lines;
+}
+
 function renderInline(self: MarkdownInternals, tokens: MarkdownToken[], styleContext?: InlineStyleContext): string {
 	let result = "";
 	const resolvedStyleContext = styleContext ?? self.getDefaultInlineStyleContext();
@@ -139,7 +167,7 @@ export default function brutalistMarkdown(_pi: ExtensionAPI) {
 		proto.renderInlineTokens = proto[ORIGINALS_KEY].renderInlineTokens;
 		proto.renderToken = proto[ORIGINALS_KEY].renderToken;
 		if (proto[ORIGINALS_KEY].renderList) proto.renderList = proto[ORIGINALS_KEY].renderList;
-		proto.renderListItem = proto[ORIGINALS_KEY].renderListItem;
+		if (proto[ORIGINALS_KEY].renderListItem) proto.renderListItem = proto[ORIGINALS_KEY].renderListItem;
 	} else {
 		proto[ORIGINALS_KEY] = {
 			renderInlineTokens: proto.renderInlineTokens,
@@ -153,8 +181,15 @@ export default function brutalistMarkdown(_pi: ExtensionAPI) {
 	// Backfill for sessions that loaded an older version of this extension before renderList was patched.
 	if (!originals.renderList) originals.renderList = proto.renderList;
 
-	proto.renderList = function patchedRenderList(token: MarkdownToken, depth: number, styleContext?: InlineStyleContext) {
+	proto.renderList = function patchedRenderList(
+		token: MarkdownToken,
+		depth: number,
+		widthOrStyleContext: number | InlineStyleContext,
+		maybeStyleContext?: InlineStyleContext,
+	) {
 		const lines: string[] = [];
+		const width = typeof widthOrStyleContext === "number" ? widthOrStyleContext : 80;
+		const styleContext = typeof widthOrStyleContext === "number" ? maybeStyleContext : widthOrStyleContext;
 		const indent = "  ".repeat(depth);
 		const startNumber = typeof token.start === "number" ? token.start : 1;
 		const items = Array.isArray(token.items) ? token.items : [];
@@ -163,28 +198,34 @@ export default function brutalistMarkdown(_pi: ExtensionAPI) {
 		for (let i = 0; i < items.length; i++) {
 			const item = items[i] as MarkdownToken;
 			const bullet = ordered ? `${startNumber + i}. ` : "- ";
-			const itemLines = originals.renderListItem.call(this, tokenArray(item), depth, styleContext);
+			const firstPrefix = indent + listMarker(bullet);
+			const continuationPrefix = indent + " ".repeat(visibleWidth(bullet));
+			const itemWidth = Math.max(1, width - visibleWidth(firstPrefix));
+			let renderedAnyLine = false;
 
-			if (itemLines.length > 0) {
-				const firstLine = itemLines[0] ?? "";
-				const isNestedList = /^\s+\x1b\[[\d;]*m[-\d]/.test(firstLine);
-				lines.push(isNestedList ? firstLine : indent + listMarker(bullet) + firstLine);
-
-				for (let j = 1; j < itemLines.length; j++) {
-					const line = itemLines[j] ?? "";
-					const isNestedListLine = /^\s+\x1b\[[\d;]*m[-\d]/.test(line);
-					lines.push(isNestedListLine ? line : `${indent}  ${line}`);
+			for (const itemToken of tokenArray(item)) {
+				if (itemToken.type === "list") {
+					lines.push(...this.renderList(itemToken, depth + 1, width, styleContext));
+					renderedAnyLine = true;
+					continue;
 				}
-			} else {
-				lines.push(indent + listMarker(bullet));
+
+				for (const itemLine of this.renderToken(itemToken, itemWidth, undefined, styleContext)) {
+					for (const wrappedLine of wrapTextWithAnsi(stripTaskMarker(itemLine), itemWidth)) {
+						lines.push((renderedAnyLine ? continuationPrefix : firstPrefix) + wrappedLine);
+						renderedAnyLine = true;
+					}
+				}
 			}
+
+			if (!renderedAnyLine) lines.push(firstPrefix);
 		}
 
 		return lines;
 	};
 
 	proto.renderListItem = function patchedRenderListItem(tokens: MarkdownToken[], parentDepth: number, styleContext?: InlineStyleContext) {
-		return originals.renderListItem.call(this, tokens, parentDepth, styleContext).map(stripTaskMarker);
+		return renderListItemCompat(this, originals, tokens, parentDepth, 80, styleContext);
 	};
 
 	proto.renderInlineTokens = function patchedRenderInlineTokens(tokens: MarkdownToken[], styleContext?: InlineStyleContext) {
@@ -194,11 +235,12 @@ export default function brutalistMarkdown(_pi: ExtensionAPI) {
 	proto.renderToken = function patchedRenderToken(token: MarkdownToken, width: number, nextTokenType?: string, styleContext?: unknown) {
 		if (token.type === "list" && Array.isArray(token.items) && token.items.some(isTaskItem)) {
 			const lines: string[] = [];
+			const itemWidth = Math.max(1, width - 2);
 
 			for (const item of token.items as MarkdownToken[]) {
 				const done = taskDone(item);
 				const box = done ? `${BLACK}■${RESET}` : `${BLACK}□${RESET}`;
-				const itemLines = this.renderListItem(tokenArray(item), 0, styleContext as InlineStyleContext | undefined);
+				const itemLines = renderListItemCompat(this, originals, tokenArray(item), 0, itemWidth, styleContext as InlineStyleContext | undefined);
 				const first = stripTaskMarker(itemLines[0] ?? "");
 				lines.push(`${box} ${done ? MUTED : ""}${first}${done ? RESET : ""}`);
 

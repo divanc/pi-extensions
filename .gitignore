@@ -7,3 +7,4 @@ agent/skills
 /context-mode/sessions/context-mode.db
 /context-mode/sessions/context-mode.db-shm
 /context-mode/sessions/context-mode.db-wal
+/context-mode/sessions
